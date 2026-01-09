@@ -10,10 +10,13 @@ class InteractiveCropNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-
                 "images": ("IMAGE",),
 
-                "crop_data": ("STRING", {"default": "0,0,512,512", "multiline": False}),
+
+                "crop_width": ("INT", {"default": 512, "min": 1, "max": 8192, "step": 1}),
+                "crop_height": ("INT", {"default": 512, "min": 1, "max": 8192, "step": 1}),
+                "x": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 1}),
+                "y": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 1}),
             }
         }
 
@@ -21,13 +24,12 @@ class InteractiveCropNode:
     FUNCTION = "load_and_crop"
     CATEGORY = "image"
     
-
     OUTPUT_NODE = True 
 
-    def load_and_crop(self, images, crop_data):
+
+    def load_and_crop(self, images, crop_width, crop_height, x, y):
         img = None
         preview_result = None
-
 
         # Take the first image in the batch for the preview/UI interaction
         batch_img = images[0]
@@ -36,21 +38,16 @@ class InteractiveCropNode:
         i = 255. * batch_img.cpu().numpy()
         img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
 
-
         preview_result = self._save_preview(img)
 
 
-        try:
-            x, y, w, h = map(int, crop_data.split(','))
-        except ValueError:
-            x, y, w, h = 0, 0, img.width, img.height
-
-
+        # Ensure coordinates and dimensions are within bounds
         x = max(0, min(x, img.width - 1))
         y = max(0, min(y, img.height - 1))
-        w = max(1, min(w, img.width - x))
-        h = max(1, min(h, img.height - y))
+        
 
+        w = max(1, min(crop_width, img.width - x))
+        h = max(1, min(crop_height, img.height - y))
 
         # Crop the tensor batch directly: [:, y:y+h, x:x+w, :]
         output_image = images[:, y:y+h, x:x+w, :]
@@ -58,9 +55,7 @@ class InteractiveCropNode:
         # Create mask
         mask = torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu")
 
-
-        # CHANGED: Use a custom key 'crop_preview' instead of 'images'
-        # This prevents ComfyUI from automatically attaching its own PreviewImage widget
+        # Use a custom key 'crop_preview' instead of 'images'
         result = {"ui": {"crop_preview": []}, "result": (output_image, mask)}
         
         if preview_result:
@@ -84,6 +79,7 @@ class InteractiveCropNode:
             "type": "temp"
         }
 
+
     @classmethod
-    def IS_CHANGED(s, images, crop_data):
+    def IS_CHANGED(s, images, crop_width, crop_height, x, y):
         return float("nan")

@@ -15,17 +15,33 @@ app.registerExtension({
             this.uploaded_image = null;
             this.img_obj = new Image();
             
-
             this.crop = { x: 0, y: 0, w: 512, h: 512 };
             this.dragState = { isDragging: false, startX: 0, startY: 0, initialCropX: 0, initialCropY: 0 };
 
-            // Find widgets
-            this.coordWidget = this.widgets.find(w => w.name === "crop_data");
-            
 
-            if (this.coordWidget) {
-                this.coordWidget.type = "hidden";
-            }
+            this.widgetX = this.widgets.find(w => w.name === "x");
+            this.widgetY = this.widgets.find(w => w.name === "y");
+            this.widgetW = this.widgets.find(w => w.name === "crop_width");
+            this.widgetH = this.widgets.find(w => w.name === "crop_height");
+
+
+            // This ensures manual entry in the UI updates the red box on the canvas
+            const callback = () => {
+                if (this.widgetX) this.crop.x = this.widgetX.value;
+                if (this.widgetY) this.crop.y = this.widgetY.value;
+                if (this.widgetW) this.crop.w = this.widgetW.value;
+                if (this.widgetH) this.crop.h = this.widgetH.value;
+                this.setDirtyCanvas(true, true);
+            };
+
+
+            if (this.widgetX) this.widgetX.callback = callback;
+            if (this.widgetY) this.widgetY.callback = callback;
+            if (this.widgetW) this.widgetW.callback = callback;
+            if (this.widgetH) this.widgetH.callback = callback;
+
+            // Initialize internal state from default widget values
+            callback();
 
             // Set a default size for the node to accommodate the canvas drawing
             this.setSize([530, 600]);
@@ -36,7 +52,6 @@ app.registerExtension({
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function(message) {
             onExecuted?.apply(this, arguments);
-
 
             // This matches the Python side change and ensures we only get the data 
             // without triggering the default widget.
@@ -185,11 +200,10 @@ app.registerExtension({
             if (this.dragState.isDragging) {
                 this.dragState.isDragging = false;
                 
-                // Update the hidden widget for Python backend
-                if (this.coordWidget) {
-                    const data = `${Math.round(this.crop.x)},${Math.round(this.crop.y)},${Math.round(this.crop.w)},${Math.round(this.crop.h)}`;
-                    this.coordWidget.value = data;
-                }
+
+                if (this.widgetX) this.widgetX.value = Math.round(this.crop.x);
+                if (this.widgetY) this.widgetY.value = Math.round(this.crop.y);
+                
                 return true;
             }
         };
