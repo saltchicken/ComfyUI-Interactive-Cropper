@@ -20,25 +20,11 @@ app.registerExtension({
             this.dragState = { isDragging: false, startX: 0, startY: 0, initialCropX: 0, initialCropY: 0 };
 
             // Find widgets
-            this.uploadWidget = this.widgets.find(w => w.name === "image_upload");
             this.coordWidget = this.widgets.find(w => w.name === "crop_data");
             
 
             if (this.coordWidget) {
                 this.coordWidget.type = "hidden";
-            }
-
-            // Hook into the upload widget to detect file selection immediately
-            if (this.uploadWidget) {
-                const originalCallback = this.uploadWidget.callback;
-                this.uploadWidget.callback = (v) => {
-                    originalCallback?.(v);
-                    this.loadPreviewImage(v, "", "input"); 
-                };
-                // If the widget already has a value (e.g. reloading workflow), load it
-                if (this.uploadWidget.value) {
-                    this.loadPreviewImage(this.uploadWidget.value, "", "input");
-                }
             }
 
             // Set a default size for the node to accommodate the canvas drawing
@@ -51,24 +37,12 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function(message) {
             onExecuted?.apply(this, arguments);
 
-            if (message && message.images && message.images.length > 0) {
-                const img = message.images[0];
-                this.loadPreviewImage(img.filename, img.subfolder, img.type);
-            }
-            
 
-            // When the Python node returns 'ui': {'images': ...}, ComfyUI often appends a default 
-            // image preview widget. This widget draws over our custom canvas, causing the 
-            // "double image" effect and blocking mouse events (red box not draggable).
-            if (this.widgets) {
-                for (let i = this.widgets.length - 1; i >= 0; i--) {
-                    const w = this.widgets[i];
-                    // Keep only our known input widgets
-                    if (w.name !== "image_upload" && w.name !== "crop_data") {
-                        // Remove the intrusive widget
-                        this.widgets.splice(i, 1);
-                    }
-                }
+            // This matches the Python side change and ensures we only get the data 
+            // without triggering the default widget.
+            if (message && message.crop_preview && message.crop_preview.length > 0) {
+                const img = message.crop_preview[0];
+                this.loadPreviewImage(img.filename, img.subfolder, img.type);
             }
         };
 

@@ -11,14 +11,9 @@ class InteractiveCropNode:
         return {
             "required": {
 
-                "crop_data": ("STRING", {"default": "0,0,512,512", "multiline": False}),
-            },
-            "optional": {
-
                 "images": ("IMAGE",),
 
-                # but 'image' is standard for the widget name in ComfyUI)
-                "image_upload": ("STRING", {"image_upload": True}),
+                "crop_data": ("STRING", {"default": "0,0,512,512", "multiline": False}),
             }
         }
 
@@ -29,35 +24,20 @@ class InteractiveCropNode:
 
     OUTPUT_NODE = True 
 
-    def load_and_crop(self, crop_data, images=None, image_upload=None):
+    def load_and_crop(self, images, crop_data):
         img = None
         preview_result = None
 
 
-        if images is not None:
-            # Take the first image in the batch for the preview/UI interaction
-            # (ComfyUI tensors are [Batch, Height, Width, Channels])
-            batch_img = images[0]
-            
-            # Convert Tensor to PIL for cropping logic
-            i = 255. * batch_img.cpu().numpy()
-            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-
-
-            preview_result = self._save_preview(img)
-
-
-        elif image_upload is not None:
-            image_path = folder_paths.get_annotated_filepath(image_upload)
-            img = Image.open(image_path)
-            img = ImageOps.exif_transpose(img)
-            img = img.convert("RGB")
+        # Take the first image in the batch for the preview/UI interaction
+        batch_img = images[0]
         
-        # Validation
-        if img is None:
-             # Return a blank black image if nothing provided to prevent crash
-             blank = torch.zeros((1, 512, 512, 3), dtype=torch.float32, device="cpu")
-             return (blank, torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu"))
+        # Convert Tensor to PIL for cropping logic
+        i = 255. * batch_img.cpu().numpy()
+        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+
+
+        preview_result = self._save_preview(img)
 
 
         try:
@@ -72,31 +52,19 @@ class InteractiveCropNode:
         h = max(1, min(h, img.height - y))
 
 
-        # If input was a batch, we crop the specific area on the *original tensor*
-        # to preserve gradients or batch data if we wanted, 
-        # but for this simple implementation we crop the PIL image we prepared.
-        # If 'images' input was used, this applies to the first frame. 
-        # To handle full batches properly, we should slice the tensor.
-        
-        if images is not None:
-            # Crop the tensor batch directly: [:, y:y+h, x:x+w, :]
-            # Ensure coordinates are within bounds for the tensor shape
-            output_image = images[:, y:y+h, x:x+w, :]
-        else:
-            # Crop the PIL image
-            crop_box = (x, y, x + w, y + h)
-            cropped_img = img.crop(crop_box)
-            output_image = np.array(cropped_img).astype(np.float32) / 255.0
-            output_image = torch.from_numpy(output_image)[None,]
+        # Crop the tensor batch directly: [:, y:y+h, x:x+w, :]
+        output_image = images[:, y:y+h, x:x+w, :]
 
         # Create mask
         mask = torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu")
 
 
-        result = {"ui": {"images": []}, "result": (output_image, mask)}
+        # CHANGED: Use a custom key 'crop_preview' instead of 'images'
+        # This prevents ComfyUI from automatically attaching its own PreviewImage widget
+        result = {"ui": {"crop_preview": []}, "result": (output_image, mask)}
         
         if preview_result:
-            result["ui"]["images"].append(preview_result)
+            result["ui"]["crop_preview"].append(preview_result)
 
         return result
 
@@ -117,12 +85,5 @@ class InteractiveCropNode:
         }
 
     @classmethod
-    def IS_CHANGED(s, crop_data, images=None, image_upload=None):
-
-        if images is not None:
-            return float("nan")
-        if image_upload:
-            image_path = folder_paths.get_annotated_filepath(image_upload)
-            m = os.path.getmtime(image_path)
-            return f"{m}_{crop_data}"
-        return crop_data
+    def IS_CHANGED(s, images, crop_data):
+        return float("nan")
