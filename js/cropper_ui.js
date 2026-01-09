@@ -18,14 +18,13 @@ app.registerExtension({
             this.crop = { x: 0, y: 0, w: 512, h: 512 };
             this.dragState = { isDragging: false, startX: 0, startY: 0, initialCropX: 0, initialCropY: 0 };
 
-
+            // Find the specific integer widgets instead of the hidden string widget
             this.widgetX = this.widgets.find(w => w.name === "x");
             this.widgetY = this.widgets.find(w => w.name === "y");
             this.widgetW = this.widgets.find(w => w.name === "crop_width");
             this.widgetH = this.widgets.find(w => w.name === "crop_height");
 
-
-            // This ensures manual entry in the UI updates the red box on the canvas
+            // Create a callback to update internal state when widgets change
             const callback = () => {
                 if (this.widgetX) this.crop.x = this.widgetX.value;
                 if (this.widgetY) this.crop.y = this.widgetY.value;
@@ -34,7 +33,7 @@ app.registerExtension({
                 this.setDirtyCanvas(true, true);
             };
 
-
+            // Attach callback to all widgets
             if (this.widgetX) this.widgetX.callback = callback;
             if (this.widgetY) this.widgetY.callback = callback;
             if (this.widgetW) this.widgetW.callback = callback;
@@ -53,12 +52,25 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function(message) {
             onExecuted?.apply(this, arguments);
 
-            // This matches the Python side change and ensures we only get the data 
-            // without triggering the default widget.
             if (message && message.crop_preview && message.crop_preview.length > 0) {
                 const img = message.crop_preview[0];
                 this.loadPreviewImage(img.filename, img.subfolder, img.type);
             }
+        };
+
+
+        nodeType.prototype.getWidgetHeight = function() {
+            if (!this.widgets || this.widgets.length === 0) return 40;
+            // Scan widgets to find the bottom-most position
+            let bottomY = 0;
+            for(const w of this.widgets) {
+                // ComfyUI widgets usually have last_y populated after first draw, 
+                // or we can estimate based on index if not yet drawn.
+                const y = w.last_y || (this.widgets.indexOf(w) * 20); 
+                const h = w.computeSize ? w.computeSize()[1] : 20;
+                bottomY = Math.max(bottomY, y + h);
+            }
+            return bottomY + 20; // Add padding
         };
 
         nodeType.prototype.loadPreviewImage = function(filename, subfolder = "", type = "input") {
@@ -71,7 +83,6 @@ app.registerExtension({
                 format: "image"
             });
 
-            // Prevent caching to ensure we see updates
             const src = api.apiURL(`/view?${params.toString()}`);
             
             this.img_obj.src = src;
@@ -82,6 +93,19 @@ app.registerExtension({
                 if (this.crop.w > this.img_obj.width) this.crop.w = this.img_obj.width;
                 if (this.crop.h > this.img_obj.height) this.crop.h = this.img_obj.height;
                 
+
+                const widgetHeight = this.getWidgetHeight();
+                const margin = 10;
+                const targetWidth = this.size[0]; // Keep current width
+                const displayWidth = targetWidth - (margin * 2);
+                
+                // Calculate expected height
+                const scale = displayWidth / this.uploaded_image.width;
+                const displayHeight = this.uploaded_image.height * scale;
+                
+                // Resize node: Widgets + Image + Bottom Margin
+                this.setSize([targetWidth, widgetHeight + displayHeight + margin + 10]);
+
                 // Force a redraw
                 this.setDirtyCanvas(true, true);
             };
@@ -94,9 +118,12 @@ app.registerExtension({
 
             if (!this.uploaded_image) return;
 
-            // Layout calculations
+
+            // This pushes the image down below the inputs
+            const widgetHeight = this.getWidgetHeight();
             const margin = 10;
-            const top_padding = 40; // Leave space for the upload button
+            const top_padding = widgetHeight; 
+            
             const displayWidth = this.size[0] - (margin * 2);
             
             // Calculate scale to fit width
@@ -166,6 +193,17 @@ app.registerExtension({
         };
 
         nodeType.prototype.onMouseMove = function(e, local_pos) {
+
+            // If the mouse button (button 0) is not held down, cancel drag.
+            // This handles cases where mouseUp happened outside the node.
+            if (e.buttons === 0 && this.dragState.isDragging) {
+                this.dragState.isDragging = false;
+                // Sync widgets one last time just in case
+                if (this.widgetX) this.widgetX.value = Math.round(this.crop.x);
+                if (this.widgetY) this.widgetY.value = Math.round(this.crop.y);
+                return;
+            }
+
             if (this.dragState.isDragging && this.imageArea) {
                 const [mx, my] = local_pos;
                 const scale = this.imageArea.scale;
@@ -200,7 +238,7 @@ app.registerExtension({
             if (this.dragState.isDragging) {
                 this.dragState.isDragging = false;
                 
-
+                // Update the explicit X and Y widgets instead of crop_data
                 if (this.widgetX) this.widgetX.value = Math.round(this.crop.x);
                 if (this.widgetY) this.widgetY.value = Math.round(this.crop.y);
                 
